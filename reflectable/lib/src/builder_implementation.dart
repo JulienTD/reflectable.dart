@@ -2264,10 +2264,9 @@ class _ReflectorDomain {
       if (_isPlatformLibrary(element.library)) {
         metadataCode = 'const []';
       } else {
-        var declaration = await _getDeclaration(element, _resolver);
-        // The declaration may be null because the element is synthetic, and
+        FormalParameter node = await _getDeclarationAst(element, _resolver);
+        // The node may be null because the element is synthetic, and
         // then it has no metadata.
-        FormalParameter node = declaration?.node;
         if (node == null) {
           metadataCode = 'const []';
         } else {
@@ -2297,11 +2296,10 @@ class _ReflectorDomain {
     // TODO(eernst): 'dart:*' is not considered valid. To survive, we return
     // '' for all declarations from there. Issue 173.
     if (_isPlatformLibrary(parameterElement.library)) return '';
-    var declaration = await _getDeclaration(parameterElement, _resolver);
-    // The declaration can be null because the declaration is synthetic, e.g.,
+    FormalParameter parameterNode =
+        await _getDeclarationAst(parameterElement, _resolver);
+    // The node can be null because the declaration is synthetic, e.g.,
     // the parameter of an induced setter; they have no default value.
-    if (declaration == null) return '';
-    FormalParameter parameterNode = declaration.node;
     if (parameterNode is DefaultFormalParameter &&
         parameterNode.defaultValue != null) {
       return await _extractConstantCode(parameterNode.defaultValue,
@@ -3605,9 +3603,9 @@ class BuilderImplementation {
       return false;
     }
 
-    final declaration = await _getDeclaration(constructor, _resolver);
-    if (declaration == null) return false;
-    ConstructorDeclaration constructorDeclarationNode = declaration.node;
+    ConstructorDeclaration constructorDeclarationNode =
+        await _getDeclarationAst(constructor, _resolver);
+    if (constructorDeclarationNode == null) return false;
     NodeList<ConstructorInitializer> initializers =
         constructorDeclarationNode.initializers;
     if (initializers.length > 1) {
@@ -4027,8 +4025,8 @@ class BuilderImplementation {
       return _Capabilities(<ec.ReflectCapability>[]);
     }
 
-    final declaration = await _getDeclaration(constructorElement, _resolver);
-    ConstructorDeclaration constructorDeclarationNode = declaration.node;
+    ConstructorDeclaration constructorDeclarationNode =
+        await _getDeclarationAst(constructorElement, _resolver);
     NodeList<ConstructorInitializer> initializers =
         constructorDeclarationNode.initializers;
 
@@ -4546,12 +4544,12 @@ Future<String> _extractConstantCode(
         Element staticElement = expression.staticElement;
         if (staticElement is PropertyAccessorElement) {
           VariableElement variable = staticElement.variable;
-          var declaration = await _getDeclaration(variable, resolver);
-          if (declaration == null || declaration.node == null) {
+          VariableDeclaration variableDeclaration =
+              await _getDeclarationAst(variable, resolver);
+          if (variableDeclaration == null) {
             await _severe('Cannot handle private identifier $expression');
             return '';
           }
-          VariableDeclaration variableDeclaration = declaration.node;
           return await helper(variableDeclaration.initializer);
         } else {
           await _severe('Cannot handle private identifier $expression');
@@ -4667,9 +4665,7 @@ CompilationUnit _definingCompilationUnit(
 }
 
 // Helper for _extractMetadataCode.
-NodeList<Annotation> _getLibraryMetadata(
-    ResolvedLibraryResult resolvedLibrary) {
-  var unit = _definingCompilationUnit(resolvedLibrary);
+NodeList<Annotation> _getLibraryMetadata(CompilationUnit unit) {
   if (unit != null) {
     var directive = unit.directives[0];
     if (directive is LibraryDirective) {
@@ -4680,11 +4676,7 @@ NodeList<Annotation> _getLibraryMetadata(
 }
 
 // Helper for _extractMetadataCode.
-NodeList<Annotation> _getOtherMetadata(
-    ResolvedLibraryResult resolvedLibrary, Element element) {
-  var declaration = resolvedLibrary.getElementDeclaration(element);
-  // `declaration` can be null if element is synthetic.
-  AstNode node = declaration?.node;
+NodeList<Annotation> _getOtherMetadata(AstNode node, Element element) {
   if (node == null || node is EnumConstantDeclaration) {
     // `node` can be null with members of subclasses of `Element` from
     // 'dart:html', and individual enum values cannot have metadata.
@@ -4738,9 +4730,11 @@ Future<String> _extractMetadataCode(Element element, Resolver resolver,
   NodeList<Annotation> metadata;
   var resolvedLibrary = await _getResolvedLibrary(element.library, resolver);
   if (element is LibraryElement) {
-    metadata = _getLibraryMetadata(resolvedLibrary);
+    metadata = _getLibraryMetadata(_definingCompilationUnit(resolvedLibrary));
   } else {
-    metadata = _getOtherMetadata(resolvedLibrary, element);
+    // The declaration is null if the element is synthetic.
+    metadata = _getOtherMetadata(
+        resolvedLibrary.getElementDeclaration(element)?.node, element);
   }
   if (metadata == null || metadata.isEmpty) return 'const []';
 
@@ -5388,7 +5382,8 @@ Future<String> _formatDiagnosticMessage(
   // TODO(eernst): 'dart:*' is not considered valid. To survive, we return
   // a message with no location info when `element` is from 'dart:*'. Issue 173.
   if (nameOffset != null && !_isPlatformLibrary(target.library)) {
-    final targetDeclaration = await _getDeclaration(target, resolver);
+    final resolvedLibrary = await _getResolvedLibrary(target.library, resolver);
+    final targetDeclaration = resolvedLibrary.getElementDeclaration(target);
     final unit = targetDeclaration.resolvedUnit.unit;
     final location = unit.lineInfo?.getLocation(nameOffset);
     if (location != null) {
@@ -5410,13 +5405,12 @@ Future<void> _emitMessage(String message,
   log.warning(formattedMessage);
 }
 
-/// Return the [ElementDeclarationResult] of the given [element].
-///
-/// Uses the [resolver] to avoid an `InconsistentAnalysisException`.
-Future<ElementDeclarationResult> _getDeclaration(
+/// Return [AstNode] of declaration of [element], null if synthetic.
+Future<AstNode> _getDeclarationAst(
     Element element, Resolver resolver) async {
+  // return await resolver.astNodeFor(element, resolve: true);
   final resolvedLibrary = await _getResolvedLibrary(element.library, resolver);
-  return resolvedLibrary.getElementDeclaration(element);
+  return resolvedLibrary.getElementDeclaration(element)?.node;
 }
 
 /// Return the [ResolvedLibraryResult] of the given [library].

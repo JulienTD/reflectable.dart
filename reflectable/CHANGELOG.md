@@ -1,3 +1,10 @@
+## 2.2.10
+
+* Change code generation to use new `Resolver.astNodeFor` method, eliminating
+  the `InconsistentAnalysisException` workaround in most cases.
+* Prevent unnecessary code generation for inputs named `*.vm_test.*`, 
+  `*.node_test.*`, or `*.browser_test.*`, to reduce code generation time.
+
 ## 2.2.9
 
 * Change `build.yaml` to ensure that 'lib/main.dart' will again be considered
